@@ -239,121 +239,161 @@ gives the headline specification and results.
   `track_duration_minutes`, `album_type`, `artist_1_genre_1` (all 17
   observed genres as individual levels, plus an explicit `Unknown` level —
   never collapsed to top-N/Other or merged into another category), and
-  `release_decade_clean` as a **categorical** feature. Release decade is
-  used deliberately, not treated as a pure content attribute — it is
-  entangled with recency, survivorship, and catalog composition (same
-  caveat as the Phase 2 SQL analysis).
+  `release_decade_clean` as a **categorical** feature — entangled with
+  recency, survivorship, and catalog composition, not a pure content
+  attribute (same caveat as the Phase 2 SQL analysis).
 - **Model B = Model A + `artist_1_pop`.** `artist_1_pop` is conceptually
   very close to the outcome (see Measurement Caveats above) — Model B is a
   contextual/predictive comparison, never evidence of a causal
   artist-popularity effect.
-- **Pipeline:** ordinary linear regression (no regularization needed —
-  condition number ≈ 217 for the full one-hot design matrix, ≈7 for the
-  reduced statsmodels spec) inside an sklearn `ColumnTransformer` +
-  `Pipeline`: median-impute + standard-scale continuous features,
-  one-hot-encode categoricals with an explicit, documented reference
-  category per feature (`album_type`→`album`, genre→`Unknown`,
-  decade→`2010` — the largest group in each, never an arbitrary
-  alphabetical drop) and `handle_unknown="ignore"` for categories unseen in
-  training. All preprocessing statistics are fit on the training split
-  only.
+- **Pipeline:** ordinary linear regression inside an sklearn
+  `ColumnTransformer` + `Pipeline`. Continuous features are median-imputed
+  and standard-scaled on training data only. Categorical features are
+  one-hot encoded with `categories="auto"` — the encoder's vocabulary
+  (which category names exist at all) is learned **strictly from the
+  training split**, never from the full dataset or the held-out test rows.
+  The dropped reference category per feature (`album_type`→`album`,
+  genre→`Unknown`, decade→`2010`) is fixed a priori from the overall
+  dataset's composition — a constant of the analysis design, not
+  re-derived per split — and `handle_unknown="ignore"` safely encodes any
+  category unique to a given test split as all-zeros.
 - **Baseline:** predicts the training-set mean for every test row.
 
 ### Split design
 
-**Primary (reported as the headline result): `GroupShuffleSplit` grouped on
-`artist_1`**, seed 42, 80/20 train/test (210,659 / 67,274 rows; 72,240 /
-18,061 unique artist groups; 0 artists on both sides). 19 rows with missing
-`artist_1` each get their own synthetic group id. **Secondary: a
-conventional reproducible random row split** (seed 42, same 80/20 ratio),
-reported for comparison, never used to pick a "better" result.
+**Primary generalization evidence: a repeated artist-grouped split**
+(`GroupShuffleSplit`, 10 fixed, pre-declared seeds —
+`[1, 7, 21, 42, 73, 101, 202, 314, 512, 999]`, chosen before looking at any
+result and never adjusted afterward), so no artist appears on both sides of
+any individual split. **Secondary: a conventional reproducible random row
+split** (seed 42), answering a different practical question, not a "less
+correct" one (see below).
 
-**Known limitation, directly confirmed rather than just theoretical:**
-`artist_1` is not a perfect canonical identifier in this extract —
-`"Various Artists"` is a placeholder for compilation tracks (14,840 rows,
-~5.3% of the dataset), not a real shared artist identity, and it has a
-*constant* `artist_1_pop = 0.0` despite its tracks' real popularity varying
-substantially (mean ≈16, up to 81). In the primary split, this entire group
-landed in the test set — see "What the grouped split revealed" below.
+**Grouping key.** `artist_1` is a useful approximate artist identifier, but
+this dataset contains labels that do not name one canonical artist:
+`"Various Artists"` (14,840 rows, a standard compilation-album credit
+covering many unrelated performers), `"Original Cast"` (8 rows, a
+cast-recording credit), and `"Unknown"` / `"Unknown Artist"` (4 / 3 rows,
+explicit unidentified-artist placeholders). These were found by an exact,
+anchored text-pattern search (e.g. `"^various artists?$"`,
+`"^unknown( artist)?$"`), never inferred from frequency alone — many
+genuine artists are also high-frequency (e.g. "Taylor Swift" at 241 rows).
+Each occurrence of one of these labels, like each row with a missing
+`artist_1`, gets its **own unique synthetic group** rather than being
+treated as one shared artist. After this correction: 105,152 groups total,
+median size 1, 90th/99th percentile sizes 5/28, and the single largest
+group is **0.10% of the dataset** (the ten largest real-artist groups range
+185–267 tracks) — no remaining group is large enough to dominate a
+held-out fold the way an unsplit "Various Artists" group once could.
 
-### Headline metrics (grouped split, primary)
+### Repeated grouped-split results (primary generalization evidence)
 
-| | n | R² | MAE | RMSE |
-|---|---:|---:|---:|---:|
-| Baseline (training mean) | 67,274 | -0.015 | 18.28 | 21.24 |
-| Model A | 67,274 | **0.147** | 16.58 | 19.48 |
-| Model B | 67,274 | 0.088 | 15.56 | 20.13 |
+| | R² range (10 seeds) | median R² | median MAE | median RMSE |
+|---|---|---:|---:|---:|
+| Model A | 0.106 – 0.127 | **0.122** | 16.51 | 19.57 |
+| Model B | 0.274 – 0.300 | **0.290** | 14.27 | 17.65 |
 
-### Headline metrics (random split, secondary)
+Model A is consistently modest and stable across all 10 independently
+chosen seeds. **Model B consistently outperforms Model A on every single
+seed.** Test-set composition is similarly stable across seeds (55,587 ±
+~1,100 rows; 21,031 held-out groups on every seed; test-mean popularity
+27.72–28.23) — the modest seed-to-seed R² spread is attributable to
+ordinary differences in which small artist groups and how much target
+variance land in a given fold, not to instability in the fitted model
+itself (identical specification and preprocessing across all 10 runs).
 
-| | n | R² | MAE | RMSE |
-|---|---:|---:|---:|---:|
-| Baseline (training mean) | 55,587 | ~0.000 | 17.88 | 20.90 |
-| Model A | 55,587 | 0.115 | 16.60 | 19.66 |
-| Model B | 55,587 | **0.276** | 14.37 | 17.79 |
+### Random split — a different use case, not a different verdict
 
-### What the grouped split revealed (the central finding)
+- **Random row split** approximately asks: *how well can the model predict
+  another track when artists represented in the test set may already have
+  other tracks represented in training?* Relevant to a platform analyzing
+  an existing catalog where known artists already have historical data.
+- **Artist-grouped split** approximately asks: *how well can the model
+  predict tracks from artists whose identities were not represented during
+  training?* Closer to generalizing toward unseen artists.
 
-Model A's R² is fairly stable across split designs (0.147 grouped vs. 0.115
-random). **Model B's R² swings from 0.088 (grouped) to 0.276 (random) — more
-than 3x its grouped value.** Investigating why: Model B collapses
-specifically in the "100+ tracks per artist" bucket (R² = -0.86 vs. 0.12 for
-Model A there, everywhere else comparable-or-better) — traced directly to
-`"Various Artists"` landing entirely in this split's test set with its
-constant, uninformative `artist_1_pop = 0`. Excluding that one group
-reverses the aggregate comparison (Model B R² ≈ 0.31 vs. Model A ≈ 0.11).
-**This does not prove `artist_1_pop` is reliably useful once that one
-group is set aside** (would need re-evaluation across multiple seeds to
-claim that), but it does concretely confirm, not just assert, that `artist_1`
-is an imperfect grouping key and that Model B's apparent gain on the random
-split reflects same-artist leakage rather than a clean, generalizable
-signal. **The grouped-vs-random gap itself — not either model's absolute
-R² — is the strongest and most robust finding here.**
+Neither is universally superior. In this dataset, with the corrected
+grouping key, the two designs largely **agree**:
 
-### Model A → Model B: what changed
+| | grouped (median of 10 seeds) | random (seed 42) |
+|---|---:|---:|
+| Model A R² | 0.122 | 0.115 |
+| Model B R² | 0.290 | 0.276 |
 
-On the raw grouped-split headline numbers, adding `artist_1_pop` *reduced*
-R² by 0.059 and pushed 19.9% of predictions below 0 (vs. 0.015% for Model
-A) — a real instability, not a modeling bug (predictions were verified
-fully finite; see notebook §9). The bounded-prediction and residual/failure
-analysis (notebook §9–§11) traces this to the specific artifact above, not
-a general failure of the added feature.
+The random split does, in principle, allow information associated with the
+same artist identity to appear across train and test, while the grouped
+split evaluates generalization to unseen artists — that structural
+difference is real. But it does not produce a large gap here: we do not
+have direct evidence in this dataset of information flowing
+inappropriately from training into test under the random design. An
+earlier working hypothesis that the random split was "inflating" Model B's
+apparent value was investigated directly and traced instead to a since-
+corrected grouping-key defect (see `"Various Artists"` below), not to the
+random split itself.
 
-### Bounded-prediction limitation
+### `"Various Artists"`: inspection and residual impact
 
-`popularity_score` is bounded [0, 100]; the linear models are not, and
-predictions were never silently clipped for the headline metrics above.
-Model A: 10/67,274 (0.015%) predictions below 0, none above 100. **Model B:
-13,388/67,274 (19.9%) below 0, none above 100.**
+`artist_1_pop` is **exactly constant (0.0) across all 14,840
+`"Various Artists"` rows**, while their actual `popularity_score` varies
+substantially (mean ≈16, std ≈19, up to 81) — confirmed directly, not
+inferred: this field does not represent the actual underlying performers
+for these compilation tracks. Before the grouping-key fix, this one label
+could land entirely on one side of a single split and dominate the
+headline comparison; excluding it from evaluation (diagnostic only — these
+rows are not removed from training or the dataset) now changes each
+model's seed-42 R² by only a few hundredths, confirming the fix resolved
+the dominant source of the earlier instability.
 
-### Strongest findings
+### Target-range compression (a central finding, not a footnote)
 
-- Model A explains a modest, honestly-reported share of popularity
-  variation (R² ≈ 0.11–0.15) — not minimized, not oversold.
-- The grouped-vs-random split gap for Model B is the single most important
-  and robust result in this analysis (see above).
-- Residual analysis: error rises sharply with actual popularity (MAE ≈13
-  low-tier vs. ≈29 high-tier — standard linear-model shrinkage on a skewed
-  target); `compilation` tracks show a large negative bias (-18.7),
-  traced to the same `"Various Artists"` artifact; `Unknown`-genre tracks
-  show a smaller systematic overprediction bias (-6.7), consistent with the
-  Phase 2 genre-availability finding.
-- Standardized coefficients (Model B): `artist_1_pop` dominates
-  (+9.98/SD — itself evidence of target proximity, not of a robust signal),
-  `loudness` (+0.43/SD) and `valence` (+0.39/SD) positive,
-  `track_duration_minutes` (-0.76/SD) and `tempo` (-0.20/SD) negative.
-  Categorical effects (genre/decade/album-type) are reported separately,
-  never combined into the same ranking as standardized continuous
-  coefficients.
+Actual `popularity_score` has a standard deviation of ≈21 and reaches 100.
+Model A's predictions have a standard deviation of only ≈7 and never
+exceed the high-40s across any of the 10 seeds; Model B's predictions have
+a standard deviation of ≈11 and never exceed the low-60s. For genuinely
+high-popularity tracks (actual tier mean ≈72), Model A's mean prediction is
+only ≈34 (MAE ≈38) and Model B's is ≈44 (MAE ≈28) — better, but still a
+severe underprediction. **Phrased carefully and scoped to this analysis:**
+observable track/content/context features, in this linear specification,
+on this dataset, distinguish low- and middle-of-the-catalog popularity to a
+modest degree but do not identify extreme popularity well. This is not
+generalized to a claim that content characteristics cannot matter for
+popularity, and no nonlinear model was added to try to close this gap
+(out of scope for this phase).
+
+### Bounded-prediction diagnostic
+
+`popularity_score` is bounded [0, 100]; predictions were never silently
+clipped for headline metrics. Across all 10 grouped seeds: Model A
+predictions fall below 0 for 0.011%–0.061% of test rows; Model B for
+0.039%–0.145%. **Neither model ever predicts above 100, on any seed.**
+
+### Other findings
+
+- Residual analysis (illustrative seed-42 split): `compilation` tracks show
+  a modestly higher MAE than `album`/`single`, but the large bias seen
+  under the uncorrected grouping key is gone — most of it traced to the
+  `"Various Artists"` artifact above, not a persistent modeling weakness.
+- Performance by artist-frequency group (descriptive only — **not** a test
+  of how Spotify computed `artist_1_pop`): Model B outperforms Model A in
+  every bucket except "100+ tracks per artist," where Model A edges ahead
+  (R² ≈0.20 vs. ≈0.14). Any contamination-style explanation for this
+  remains a hypothesis, not a demonstrated fact.
+- Standardized coefficients (Model B, illustrative split): `artist_1_pop`
+  dominates (+9.8/SD — itself a marker of target proximity, not a robust,
+  generalizable signal), `loudness` (+0.63/SD) and `valence` (+0.27/SD)
+  positive, `track_duration_minutes` (-0.73/SD) and `tempo` (-0.22/SD)
+  negative. Categorical effects (genre/decade/album-type) are reported
+  separately, never combined into the same ranking as standardized
+  continuous coefficients.
 - A reduced `statsmodels` OLS specification (standardized Model-A
   continuous features + `album_type` only, fit on the grouped training
   split) confirms these directions with p<0.01 for every coefficient and no
-  multicollinearity concern (condition number ≈7) — associational only, no
-  causal interpretation.
-- **Sensitivity dataset:** identical specifications and split design on the
-  one-record-per-`(track, artist_1)` dataset produce R²/MAE/RMSE within
-  0.001/0.01/0.01 of the primary dataset for both models — trivial, no
-  substantive conclusion changes.
+  multicollinearity concern — associational only, no causal interpretation.
+- **Sensitivity dataset:** one corrected grouped evaluation (seed 42) on
+  the one-record-per-`(track, artist_1)` dataset shows deltas within the
+  same range as ordinary seed-to-seed variability already observed in the
+  primary 10-seed sweep — not a distinct, substantive effect of switching
+  datasets. No conclusion changes.
 
 ### Scope limit
 
@@ -459,13 +499,22 @@ jupyter nbconvert --to notebook --execute --inplace \
   extract.
 - **(Phase 3)** No causal claims are made by the modeling layer either —
   Model A/B report associations only, evaluated on held-out data.
-- **(Phase 3)** `artist_1` is not a perfect canonical artist identifier;
-  `"Various Artists"` is a placeholder, not a real artist, and its constant
-  `artist_1_pop = 0` materially affects the primary grouped-split headline
-  comparison for Model B (see Phase 3 section above) — a single-seed result,
-  not verified across repeated splits.
-- **(Phase 3)** ~19.9% of Model B's grouped-split predictions fall outside
-  the valid [0, 100] popularity range — an unconstrained-linear-model
-  limitation, reported rather than clipped away.
-- **(Phase 3)** Model performance is modest (R² ≈ 0.11–0.15 for Model A) —
-  reported plainly, not oversold.
+- **(Phase 3)** `artist_1` remains an imperfect canonical artist identifier
+  even after correcting the grouping key to stop treating `"Various
+  Artists"` and a handful of other placeholder labels as one shared
+  artist — it may still contain concatenated collaborator names for
+  otherwise-normal-looking entries; the fix addresses the one concrete,
+  identifiable failure mode found in this extract, not every theoretically
+  possible one.
+- **(Phase 3)** Target-range compression is a central limitation: Model A
+  never predicts above the high-40s and Model B never above the low-60s,
+  across any of the 10 grouped-split seeds, despite `popularity_score`
+  reaching 100 — both models substantially underpredict genuinely
+  high-popularity tracks.
+- **(Phase 3)** Out-of-range predictions are small but nonzero across every
+  seed (Model A 0.011%–0.061% below 0; Model B 0.039%–0.145% below 0; never
+  above 100) — an unconstrained-linear-model limitation, reported rather
+  than clipped away.
+- **(Phase 3)** Model performance is modest (median R² ≈ 0.12 for Model A,
+  ≈ 0.29 for Model B across 10 grouped-split seeds) — reported plainly, not
+  oversold.

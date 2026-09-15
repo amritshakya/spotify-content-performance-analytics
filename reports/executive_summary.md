@@ -12,96 +12,102 @@ genre, its release context — and does knowing how popular the *artist* is
 add meaningfully more?
 
 **This is an observational dataset. Nothing here shows that any of these
-factors *cause* popularity — only that they're associated with it, to a
-degree we quantify honestly below.**
+factors *cause* popularity** — only that they're associated with it, to a
+degree we quantify honestly below, evaluated the same way ten separate
+times to make sure the result isn't a fluke of one lucky (or unlucky) test
+set.
 
-## Dataset
+## 1. Observable track/content/context features provide modest predictive information
 
-277,937 tracks from a Spotify catalog extract supplied for coursework
-(provenance and sampling-frame caveats in the root README — this is not
-established as a representative sample of Spotify's full catalog, and the
-extract's collection date is unknown).
+Using only what's directly observable about a track — loudness, musical
+positivity ("valence"), tempo, length, album type, genre, and release
+decade — a plain, interpretable model consistently explains a real but
+modest share of why some tracks in this dataset score higher than others,
+roughly 11–13% of the variation, holding steady whether we test on
+completely new artists or on a random slice of the catalog. That's an
+honest, unglamorous result, and we report it as such.
 
-## Model A: content and context only
+## 2. The model strongly compresses predictions toward the middle of the popularity range
 
-Using only observable track/content/context characteristics — loudness,
-musical positivity ("valence"), tempo, track length, album type, genre, and
-release decade — a plain linear model explains a **modest but real** share
-of why some tracks in this dataset score higher than others (roughly
-11–15% of the variation, depending on how the test set is built — see
-below). That is a legitimate, honestly-reported result, not a strong
-predictive model and not presented as one.
+This is the most important limitation of the content-only model, not a
+minor footnote: actual popularity scores in this dataset range from 0 to
+100 and are genuinely spread out, but the model's predictions almost never
+go above the mid-40s. For tracks that are *actually* very popular, the
+model's predictions average roughly half their true score. In plain terms:
+**these features can distinguish an ordinary track from a somewhat more
+popular one, but they cannot pick out a smash hit.** That's specific to this
+dataset, this feature set, and this style of model — it is not a claim
+that a song's content never matters for how popular it becomes.
 
-## What changed when artist popularity was added
+## 3. Adding artist popularity materially changes prediction — with a caveat about what "unseen artist" means
 
-Adding the artist's own popularity score (Model B) produces a genuinely
-**mixed and instructive** result rather than a clean improvement:
+Adding the artist's own popularity score roughly doubles the explained
+variation (to about 27–30%), and — after correcting how we grouped artists
+for testing (see below) — this improvement holds up consistently whether
+we test on brand-new artists or on a random sample. That is a real,
+repeatable improvement in this dataset, not a one-off. At the same time, an
+artist's own popularity score is so conceptually close to a track's
+popularity that this should be read as "artists who are already popular
+tend to have popular tracks" rather than as a discovery about what makes a
+track popular — it is not treated as a causal effect, and its practical
+value depends on whether a real use case involves already-known artists or
+genuinely new ones.
 
-- Evaluated the *conventional* way (a random sample held out for testing,
-  where the same artist can appear in both the training data and the test
-  data), Model B looks much better — explaining roughly 28% of the
-  variation, nearly double Model A.
-- Evaluated the way we consider more trustworthy for this question (holding
-  out entire *artists* the model never saw during training), Model B
-  actually performs *worse* than Model A, and produces a much larger share
-  of nonsensical predictions (popularity scores below zero).
+## 4. Random and artist-grouped evaluation answer different practical questions
 
-## What the grouped split revealed
+We tested the model two ways: once holding out entire artists the model
+never saw during training (closer to predicting for brand-new catalog
+entrants), and once with a conventional random sample (closer to a
+platform working with artists it already has some history on). These
+answer different real-world questions, and neither is "more correct" in
+general. In this dataset, once the artist-grouping was corrected (see
+below), both approaches told a consistent story.
 
-This gap is the single most important finding in this analysis, and we
-traced it to a specific, verifiable cause rather than leaving it as a
-puzzle: **artist popularity is so conceptually close to track popularity**
-that a model can partly "memorize" a specific artist's typical popularity
-from training data rather than learning something that generalizes to
-artists it has never seen. We found direct, concrete evidence of this: a
-placeholder value in the data called `"Various Artists"` (used for
-compilation albums, not a real artist) happened to fall entirely in the
-held-out test set for our specific evaluation, has a fixed "artist
-popularity" score of exactly zero regardless of the track, and covers
-tracks whose actual popularity varies enormously. That one data quirk
-alone flips the aggregate result. This does not mean artist popularity is
-useless — it means it cannot be treated as a clean, reliable, independent
-predictor of a track's popularity in this dataset, and any claim that it
-improves prediction needs to be checked against exactly this kind of
-leakage, not taken at face value from a single, convenient evaluation.
+## 5. Metadata limitations materially affect interpretation
 
-## Key descriptive/modeling findings
+Two data-quality issues turned out to matter a lot for getting this
+analysis right, and both are worth understanding, not just footnoting:
 
-- Louder and more positive-sounding ("valence") tracks are associated with
-  modestly higher popularity in this dataset; longer tracks and (weakly)
-  faster tempo are associated with modestly lower popularity.
-- Singles tend to have higher popularity than albums; compilations
-  noticeably lower — consistent with earlier SQL findings in this project.
-- The model's errors are not evenly spread: it systematically underpredicts
-  genuinely high-popularity tracks (a known behavior of simple linear
-  models applied to a skewed outcome) and shows a large, specific bias for
-  compilation tracks that traces to the same "Various Artists" artifact
-  described above.
-- Re-running everything on a secondary version of the dataset (collapsing
-  repeated track/artist entries to one row each) changes nothing
-  meaningful — results are essentially identical.
+- **Missing genre information** is common (about 60% of tracks) and is not
+  randomly missing — tracks without a listed genre tend to be less popular,
+  a pattern carried over from the data-quality phase of this project.
+- **Placeholder artist labels.** A meaningful slice of tracks (about 5% of
+  the dataset) are credited to `"Various Artists"` — a catalog label for
+  compilation albums, not a real performer — plus a handful of similar
+  placeholders (`"Unknown"`, `"Original Cast"`). Early in this analysis, we
+  found that treating `"Various Artists"` as if it were one consistent
+  artist could distort the artist-based evaluation, because the model had
+  no way to learn anything meaningful from a label that covers thousands of
+  unrelated tracks with a flat, uninformative "artist popularity" value of
+  exactly zero. We corrected this by treating each such track as its own
+  unidentified case rather than lumping them together, and re-ran the
+  evaluation ten separate times on independently chosen samples to confirm
+  the corrected result holds up. This is a good example of how a subtle
+  data-quality issue can otherwise be mistaken for a modeling insight.
 
 ## Limitations
 
 - Observational data, no causal claims, unverified sampling frame and
   collection date (carried over from the data-quality phase of this
   project).
-- The artist field is not a perfectly clean artist identifier in this
-  extract (the "Various Artists" placeholder is one concrete example).
-- Roughly 1 in 5 of the artist-popularity model's predictions on the
-  primary test set fall outside the valid 0–100 popularity range — a real
-  limitation of a simple linear model applied to a bounded outcome,
-  reported directly rather than hidden by post-hoc clipping.
-- Model performance overall is modest. This analysis is not a production
+- The artist field is still not a perfectly clean artist identifier even
+  after the correction above — it may contain concatenated collaborator
+  names in other, harder-to-detect cases.
+- Roughly 1 in 1,000 to 1 in 700 of the artist-popularity model's
+  predictions fall slightly below the valid 0–100 popularity range across
+  our repeated tests — a small, honestly-reported limitation of a simple
+  linear model, not hidden by post-hoc adjustment.
+- Model performance overall is modest, and it specifically struggles to
+  identify extreme popularity (see finding 2). This is not a production
   popularity predictor and was not built to be one.
 
 ## What this analysis does NOT establish
 
 - It does **not** show that any track characteristic, genre, or artist
   popularity *causes* higher or lower popularity.
-- It does **not** establish that artist popularity is a reliable,
-  generalizable predictor once evaluated properly — the evidence points the
-  other way, at least in this dataset and this evaluation.
+- It does **not** identify which tracks will become genuinely popular —
+  only that it can distinguish ordinary tracks from moderately popular ones
+  to a modest degree.
 - It does **not** generalize beyond this specific data extract to Spotify's
   catalog as a whole, and it was not used to inform any real business,
   marketing, or programming decision.

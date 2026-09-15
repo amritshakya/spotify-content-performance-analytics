@@ -55,11 +55,6 @@ def modeling_notes(primary_df):
 
 
 @pytest.fixture(scope="session")
-def category_levels(modeling_df):
-    return M.get_category_levels(modeling_df)
-
-
-@pytest.fixture(scope="session")
 def grouped_split_idx(modeling_df):
     return M.grouped_split(modeling_df)
 
