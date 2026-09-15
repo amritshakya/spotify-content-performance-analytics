@@ -1,8 +1,4 @@
-# Minimal dependency set for the data-foundation / SQL-analytics phase.
-# Intentionally excludes scipy, statsmodels, scikit-learn, and any
-# dashboard/visualization framework beyond matplotlib -- those are
-# reserved for a later phase (see README "Planned Modeling").
-
+# Phase 2: data-foundation / SQL-analytics dependencies.
 pandas==2.3.3
 numpy>=1.26,<3
 duckdb>=1.0,<2
@@ -10,3 +6,9 @@ pyarrow>=16.0
 matplotlib>=3.8
 jupyter>=1.0
 pytest>=8.0
+
+# Phase 3: interpretable modeling layer. No dashboard/deployment
+# frameworks, and no tree-ensemble/boosting/neural-network libraries --
+# see README "Scope Limit".
+scikit-learn>=1.4
+statsmodels>=0.14

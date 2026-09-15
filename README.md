@@ -5,10 +5,10 @@ track-catalog extract, focused on data-quality engineering, a documented
 metric layer, and SQL-based descriptive analysis of content, artist, genre,
 and release-period characteristics.
 
-**Status: Phase 2 (data foundation + SQL analytics layer) complete,
-including `sql/02_kpi_summary.sql` and `sql/03_segment_analysis.sql`.** No
-modeling, clustering, or dashboards have been built — see
-[Planned Modeling](#planned-modeling).
+**Status: Phase 2 (data foundation + SQL analytics layer) and Phase 3
+(interpretable popularity modeling) complete.** No clustering, dashboards,
+or deployment have been built — see [Phase 3: Popularity Modeling](#phase-3-popularity-modeling)
+and its Scope Limit note.
 
 ## Why This Project Exists
 
@@ -215,13 +215,151 @@ same documented rules (conditioning on observed genre, no causal claims,
 etc.) but were not individually reviewed turn-by-turn the way Q1–Q7 were.
 Full results and narration are in `notebooks/02_sql_business_analysis.ipynb`.
 
-## Planned Modeling
+## Phase 3: Popularity Modeling
 
-Not yet implemented. A future phase may explore regression-style modeling
-of `popularity_score` against content/genre/release features, purely as
-descriptive/associational modeling consistent with this project's no-causal-
-claims stance — it has not been started, attempted, or scaffolded in any way
-in this phase.
+**Question:** how much variation in `popularity_score` is associated with
+observable track/content/context characteristics, and how much additional
+predictive power appears when `artist_1_pop` is included? **This is
+observational data — nothing below is a causal claim**, and the goal is a
+defensible analytical comparison, not maximum R².
+
+Full analysis, all diagnostics, and 4 figures are in
+[`notebooks/03_popularity_modeling.ipynb`](notebooks/03_popularity_modeling.ipynb)
+and [`figures/`](figures/); a non-technical summary is in
+[`reports/executive_summary.md`](reports/executive_summary.md). This section
+gives the headline specification and results.
+
+### Model specifications
+
+- **Target:** `popularity_score`. `popularity`, `popularity_tier`, and
+  `is_high_popularity` are excluded from every model — all are derived
+  directly (`popularity` *exactly*, per §16 above) from the target.
+- **Model A (content/context):** `loudness`, `valence`, `tempo` (90
+  zero-tempo rows treated as missing, median-imputed on training data only),
+  `track_duration_minutes`, `album_type`, `artist_1_genre_1` (all 17
+  observed genres as individual levels, plus an explicit `Unknown` level —
+  never collapsed to top-N/Other or merged into another category), and
+  `release_decade_clean` as a **categorical** feature. Release decade is
+  used deliberately, not treated as a pure content attribute — it is
+  entangled with recency, survivorship, and catalog composition (same
+  caveat as the Phase 2 SQL analysis).
+- **Model B = Model A + `artist_1_pop`.** `artist_1_pop` is conceptually
+  very close to the outcome (see Measurement Caveats above) — Model B is a
+  contextual/predictive comparison, never evidence of a causal
+  artist-popularity effect.
+- **Pipeline:** ordinary linear regression (no regularization needed —
+  condition number ≈ 217 for the full one-hot design matrix, ≈7 for the
+  reduced statsmodels spec) inside an sklearn `ColumnTransformer` +
+  `Pipeline`: median-impute + standard-scale continuous features,
+  one-hot-encode categoricals with an explicit, documented reference
+  category per feature (`album_type`→`album`, genre→`Unknown`,
+  decade→`2010` — the largest group in each, never an arbitrary
+  alphabetical drop) and `handle_unknown="ignore"` for categories unseen in
+  training. All preprocessing statistics are fit on the training split
+  only.
+- **Baseline:** predicts the training-set mean for every test row.
+
+### Split design
+
+**Primary (reported as the headline result): `GroupShuffleSplit` grouped on
+`artist_1`**, seed 42, 80/20 train/test (210,659 / 67,274 rows; 72,240 /
+18,061 unique artist groups; 0 artists on both sides). 19 rows with missing
+`artist_1` each get their own synthetic group id. **Secondary: a
+conventional reproducible random row split** (seed 42, same 80/20 ratio),
+reported for comparison, never used to pick a "better" result.
+
+**Known limitation, directly confirmed rather than just theoretical:**
+`artist_1` is not a perfect canonical identifier in this extract —
+`"Various Artists"` is a placeholder for compilation tracks (14,840 rows,
+~5.3% of the dataset), not a real shared artist identity, and it has a
+*constant* `artist_1_pop = 0.0` despite its tracks' real popularity varying
+substantially (mean ≈16, up to 81). In the primary split, this entire group
+landed in the test set — see "What the grouped split revealed" below.
+
+### Headline metrics (grouped split, primary)
+
+| | n | R² | MAE | RMSE |
+|---|---:|---:|---:|---:|
+| Baseline (training mean) | 67,274 | -0.015 | 18.28 | 21.24 |
+| Model A | 67,274 | **0.147** | 16.58 | 19.48 |
+| Model B | 67,274 | 0.088 | 15.56 | 20.13 |
+
+### Headline metrics (random split, secondary)
+
+| | n | R² | MAE | RMSE |
+|---|---:|---:|---:|---:|
+| Baseline (training mean) | 55,587 | ~0.000 | 17.88 | 20.90 |
+| Model A | 55,587 | 0.115 | 16.60 | 19.66 |
+| Model B | 55,587 | **0.276** | 14.37 | 17.79 |
+
+### What the grouped split revealed (the central finding)
+
+Model A's R² is fairly stable across split designs (0.147 grouped vs. 0.115
+random). **Model B's R² swings from 0.088 (grouped) to 0.276 (random) — more
+than 3x its grouped value.** Investigating why: Model B collapses
+specifically in the "100+ tracks per artist" bucket (R² = -0.86 vs. 0.12 for
+Model A there, everywhere else comparable-or-better) — traced directly to
+`"Various Artists"` landing entirely in this split's test set with its
+constant, uninformative `artist_1_pop = 0`. Excluding that one group
+reverses the aggregate comparison (Model B R² ≈ 0.31 vs. Model A ≈ 0.11).
+**This does not prove `artist_1_pop` is reliably useful once that one
+group is set aside** (would need re-evaluation across multiple seeds to
+claim that), but it does concretely confirm, not just assert, that `artist_1`
+is an imperfect grouping key and that Model B's apparent gain on the random
+split reflects same-artist leakage rather than a clean, generalizable
+signal. **The grouped-vs-random gap itself — not either model's absolute
+R² — is the strongest and most robust finding here.**
+
+### Model A → Model B: what changed
+
+On the raw grouped-split headline numbers, adding `artist_1_pop` *reduced*
+R² by 0.059 and pushed 19.9% of predictions below 0 (vs. 0.015% for Model
+A) — a real instability, not a modeling bug (predictions were verified
+fully finite; see notebook §9). The bounded-prediction and residual/failure
+analysis (notebook §9–§11) traces this to the specific artifact above, not
+a general failure of the added feature.
+
+### Bounded-prediction limitation
+
+`popularity_score` is bounded [0, 100]; the linear models are not, and
+predictions were never silently clipped for the headline metrics above.
+Model A: 10/67,274 (0.015%) predictions below 0, none above 100. **Model B:
+13,388/67,274 (19.9%) below 0, none above 100.**
+
+### Strongest findings
+
+- Model A explains a modest, honestly-reported share of popularity
+  variation (R² ≈ 0.11–0.15) — not minimized, not oversold.
+- The grouped-vs-random split gap for Model B is the single most important
+  and robust result in this analysis (see above).
+- Residual analysis: error rises sharply with actual popularity (MAE ≈13
+  low-tier vs. ≈29 high-tier — standard linear-model shrinkage on a skewed
+  target); `compilation` tracks show a large negative bias (-18.7),
+  traced to the same `"Various Artists"` artifact; `Unknown`-genre tracks
+  show a smaller systematic overprediction bias (-6.7), consistent with the
+  Phase 2 genre-availability finding.
+- Standardized coefficients (Model B): `artist_1_pop` dominates
+  (+9.98/SD — itself evidence of target proximity, not of a robust signal),
+  `loudness` (+0.43/SD) and `valence` (+0.39/SD) positive,
+  `track_duration_minutes` (-0.76/SD) and `tempo` (-0.20/SD) negative.
+  Categorical effects (genre/decade/album-type) are reported separately,
+  never combined into the same ranking as standardized continuous
+  coefficients.
+- A reduced `statsmodels` OLS specification (standardized Model-A
+  continuous features + `album_type` only, fit on the grouped training
+  split) confirms these directions with p<0.01 for every coefficient and no
+  multicollinearity concern (condition number ≈7) — associational only, no
+  causal interpretation.
+- **Sensitivity dataset:** identical specifications and split design on the
+  one-record-per-`(track, artist_1)` dataset produce R²/MAE/RMSE within
+  0.001/0.01/0.01 of the primary dataset for both models — trivial, no
+  substantive conclusion changes.
+
+### Scope limit
+
+No clustering (K-means, PCA), no KNN, no tree ensembles/boosting, no neural
+networks, no dashboards (Streamlit/Tableau/Power BI), no APIs, and no
+deployment were added in this phase.
 
 ## Repository Structure
 
@@ -244,16 +382,25 @@ spotify-content-performance-analytics/
         build_database.py       -- Parquet + DuckDB build
         metrics.py               -- documented KPI/metric layer
         quality_audit.py         -- reusable data-quality audit computations
+        modeling.py              -- Phase 3: modeling frame, pipeline, splits, diagnostics
     notebooks/
         01_data_quality_and_cleaning.ipynb
         02_sql_business_analysis.ipynb
+        03_popularity_modeling.ipynb
+    figures/
+        01_model_comparison_grouped_split.png
+        02_actual_vs_predicted.png
+        03_standardized_coefficients.png
+        04_grouped_vs_random_split.png
     reports/
         data_quality_report.md
+        executive_summary.md
     tests/
         test_load_data.py
         test_clean_data.py
         test_metrics.py
         test_database.py
+        test_modeling.py
 ```
 
 ## Reproducibility
@@ -279,7 +426,8 @@ pytest
 # 5. Execute the notebooks headlessly:
 jupyter nbconvert --to notebook --execute --inplace \
     notebooks/01_data_quality_and_cleaning.ipynb \
-    notebooks/02_sql_business_analysis.ipynb
+    notebooks/02_sql_business_analysis.ipynb \
+    notebooks/03_popularity_modeling.ipynb
 ```
 
 ## Limitations
@@ -309,3 +457,15 @@ jupyter nbconvert --to notebook --execute --inplace \
 - This project was not used to drive any real Spotify business decision —
   it is a portfolio analytics project built on a coursework-supplied data
   extract.
+- **(Phase 3)** No causal claims are made by the modeling layer either —
+  Model A/B report associations only, evaluated on held-out data.
+- **(Phase 3)** `artist_1` is not a perfect canonical artist identifier;
+  `"Various Artists"` is a placeholder, not a real artist, and its constant
+  `artist_1_pop = 0` materially affects the primary grouped-split headline
+  comparison for Model B (see Phase 3 section above) — a single-seed result,
+  not verified across repeated splits.
+- **(Phase 3)** ~19.9% of Model B's grouped-split predictions fall outside
+  the valid [0, 100] popularity range — an unconstrained-linear-model
+  limitation, reported rather than clipped away.
+- **(Phase 3)** Model performance is modest (R² ≈ 0.11–0.15 for Model A) —
+  reported plainly, not oversold.
