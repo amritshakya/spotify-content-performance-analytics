@@ -1,0 +1,327 @@
+# Data Quality Report
+
+All figures below are recomputed programmatically from the raw extract
+(`data/raw/spotify.csv`, SHA-256 `4045adda473d6cd4fde6f3a11253faf37d7ee26fd122bcfd5c8a6c1fc5441974`)
+by `src/quality_audit.py`, `src/clean_data.py`, and `sql/01_data_quality.sql` —
+none of the numbers here are hand-typed constants. Reproduce this report by
+running `python -m src.build_database` and re-executing the queries in
+`sql/01_data_quality.sql`, or by running `notebooks/01_data_quality_and_cleaning.ipynb`.
+
+**Scope reminder:** every share/percentage below describes "tracks in this
+dataset." The sampling frame behind this extract is not established as
+random or representative of Spotify's catalog, so none of these figures are
+generalized to Spotify tracks broadly.
+
+---
+
+## 1. Shape
+
+| | Value |
+|---|---|
+| Rows (raw) | 277,938 |
+| Columns (raw) | 34 |
+| Rows (primary, after exact-dedup) | 277,937 |
+| Rows (sensitivity, one-record-per-track/artist) | 277,846 |
+
+## 2. Missing values (raw extract, selected columns)
+
+| Column | % missing |
+|---|---:|
+| `artist_2` | 100.000 |
+| `artist_3` | 100.000 |
+| `artist_3_genre_1..3` | 99.08 – 99.57 |
+| `artist_2_genre_1..3` | 96.18 – 98.12 |
+| `artist_3_pop` | 96.581 |
+| `artist_2_pop` | 87.487 |
+| `artist_1_genre_3` | 74.731 |
+| `artist_1_genre_2` | 65.492 |
+| `artist_1_genre_1` | 60.284 |
+| `track` | 0.009 |
+| `artist_1` | 0.007 |
+| `release_date` | 0.001 (4 rows) |
+
+**Notable inconsistency:** `artist_2` and `artist_3` (artist *name*) are
+**100% missing**, yet `artist_2_pop` is populated for 34,778 rows (12.5% of
+the dataset) and `artist_3_pop` for 9,503 rows (3.4%) — i.e., a numeric
+popularity value exists for a second/third artist whose name was never
+retained in this extract. This confirms `artist_2`/`artist_3` cannot be used
+as reliable artist-name fields (Cleaning Policy §D), and additionally means
+`artist_2_pop`/`artist_3_pop` describe artists that cannot be identified by
+name in this data.
+
+## 3. Exact full-row duplicates
+
+- Rows involved in exact-duplicate groups: **2** (i.e., one duplicate pair)
+- Rows removed (keep-first): **1**
+- Resulting primary row count: 277,938 → **277,937**
+
+Verified post-cleaning: `SUM(exact_duplicate_flag)` over the primary dataset
+is 0 (see `sql/01_data_quality.sql`, query 3a).
+
+## 4. `(track, artist_1)` repeats
+
+- Duplicate groups (primary dataset): **91**
+- Rows involved: **182** (0.065% of the primary dataset)
+- Largest group size observed: 2
+
+Per the cleaning policy, these repeats are **retained** in the primary
+dataset — the extract has no reliable track identifier to distinguish
+singles/album cuts/compilations/remasters/rereleases from true duplicates,
+and deduplicating by keeping the highest-`popularity_score` row would select
+on the outcome variable. See §9 for the sensitivity-dataset comparison.
+
+## 5. Categorical cardinalities (raw)
+
+| Column | Distinct values |
+|---|---:|
+| `danceability`, `energy`, `speechiness`, `acousticness`, `instrumentalness`, `liveness` | 3 each (`0low` / `1moderate` / `2high`) |
+| `popularity` | 3 (`0low` / `1moderate` / `2high`) |
+| `duration` (binned) | 6 |
+| `album_type` | 3 (`album` / `single` / `compilation`) |
+| `time_signature` | 5 (`0, 1, 3, 4, 5`) |
+| `key` | 12 |
+| `artist_1_genre_1` | 17 |
+
+## 6. Numeric ranges (raw)
+
+| Column | Min | Max | Mean | Median |
+|---|---:|---:|---:|---:|
+| `artist_1_pop` | 0.0 | 1.0 | 0.446 | 0.470 |
+| `release_date` | 1899 | 2023 | 2011.4 | 2016 |
+| `popularity_score` | 0 | 100 | 27.80 | 28.0 |
+| `loudness` (dB) | -60.0 | 4.882 | -10.36 | -8.40 |
+| `valence` | 0.0 | 1.0 | 0.450 | 0.434 |
+| `tempo` (BPM) | 0.0 | 244.9 | 119.20 | 119.94 |
+| `duration_ms` | 6,706 | 3,919,895 | 232,496 | 213,106 |
+
+## 7. `tempo == 0`
+
+**90 rows** (0.032%). Flagged via `tempo_quality_flag = 'zero_tempo'` and
+treated as missing for analyses requiring meaningful tempo — the raw value is
+preserved unchanged. Not asserted as certainly erroneous (a track could in
+principle have no discernible tempo), but 0 BPM is not a physically
+meaningful value for a music track and is a strong candidate for a
+measurement placeholder.
+
+## 8. `release_date == 1899`
+
+**13 rows** (0.005%). Flagged via `suspicious_release_date_flag`. 1899 is a
+common integer-null placeholder pattern in datasets like this but is **not**
+asserted as invalid here — the observations are preserved and the flag
+allows exclusion in a sensitivity analysis rather than forcing a judgment
+call now.
+
+## 9. `time_signature` unusual values
+
+Course documentation describes valid levels as `{3, 4, 5, 7}`. Observed
+distribution:
+
+| `time_signature` | Count | Documented as valid? |
+|---:|---:|:---:|
+| 0 | 95 | No |
+| 1 | 3,192 | No |
+| 3 | 29,582 | Yes |
+| 4 | 239,497 | Yes |
+| 5 | 5,572 | Yes |
+| 7 | 0 | Yes (never observed) |
+
+3,287 rows (1.18%) carry a `time_signature` value (`0` or `1`) outside the
+documented valid set. These rows are preserved unmodified; no flag was added
+beyond noting it here, since no analysis in this phase depends on
+`time_signature`.
+
+## 10. `artist_2` / `artist_3` missingness
+
+See §2 above. Both are 100% missing as artist names in this extract and are
+documented as unusable for any artist-identification purpose (Cleaning
+Policy §D). No speculative reconstruction was attempted.
+
+## 11. Primary-genre completeness
+
+- Present: **110,387** (39.72%)
+- Missing: **167,551** (60.28%)
+
+## 12. Popularity distribution
+
+| Statistic | Value |
+|---|---:|
+| Mean | 27.80 |
+| Median | 28.0 |
+| Skew | 0.201 (mild right skew) |
+| `popularity_score == 0` | 46,868 rows (**16.86%**) |
+| P1 / P5 / P10 | 0.0 / 0.0 / 0.0 |
+| P25 / P50 / P75 | 8.0 / 28.0 / 44.0 |
+| P90 / P99 | 56.0 / 73.0 |
+
+The bottom 10% of the distribution is entirely 0, and 16.86% of all tracks
+sit exactly at 0 — a large spike rather than a smoothly tapering lower tail.
+This pattern is **consistent with** the extract having been pre-filtered
+(e.g., a minimum-plays or catalog-availability cutoff applied upstream before
+this CSV was assembled) — it is reported here as **suggestive evidence, not
+proof**, since no documentation of a filtering step accompanies the extract.
+
+## 13. Album-type distribution
+
+| `album_type` | Count | Share |
+|---|---:|---:|
+| `album` | 161,873 | 58.24% |
+| `single` | 92,835 | 33.40% |
+| `compilation` | 23,230 | 8.36% |
+
+## 14. Release-decade distribution (raw, by `release_date`)
+
+| Decade | Count |
+|---:|---:|
+| 1890s | 13 |
+| 1900s | 10 |
+| 1910s | 18 |
+| 1920s | 68 |
+| 1930s | 123 |
+| 1940s | 99 |
+| 1950s | 1,349 |
+| 1960s | 4,010 |
+| 1970s | 6,515 |
+| 1980s | 8,244 |
+| 1990s | 19,580 |
+| 2000s | 40,579 |
+| 2010s | 108,480 |
+| 2020s | 88,846 |
+| missing `release_date` | 4 |
+
+The dataset is heavily weighted toward the 2010s and 2020s (71% of all
+tracks combined). Any decade-level comparison later in this project is
+phrased as "current popularity of tracks released in each decade" or
+"popularity at the dataset's collection time" — never as "performance by
+decade" — because `popularity_score` reflects play activity at an unknown,
+single collection moment, and older-decade tracks in this dataset are a
+recency-and-survivorship-filtered subset of everything ever released in that
+decade, not a full accounting of it.
+
+## 15. Genre-availability bias check
+
+Comparing tracks with a populated `artist_1_genre_1` against tracks without one:
+
+| | With primary genre | Without primary genre |
+|---|---:|---:|
+| n | 110,387 | 167,551 |
+| Share of dataset | 39.72% | 60.28% |
+| Median `popularity_score` | **35.0** | **25.0** |
+| Mean `popularity_score` | 32.62 | 24.62 |
+| Mean `artist_1_pop` | **0.555** | **0.375** |
+
+**Direction and magnitude:** tracks with an observed primary genre have a
+40% higher median popularity score (35 vs. 25) and a 48% higher mean
+`artist_1_pop` (0.555 vs. 0.375) than tracks without one. Genre availability
+also correlates with release period — tracks *without* a primary genre skew
+noticeably more toward the 2020s (37.5% of the no-genre group vs. 23.6% of
+the with-genre group), while tracks *with* a primary genre are relatively
+over-represented from the 1970s through the 2010s.
+
+**Conclusion: genre availability is not random with respect to popularity,
+artist popularity, or release period in this dataset.** Every genre-based
+finding elsewhere in this project is therefore conditioned explicitly on
+"tracks in this dataset with an observed primary genre" and is never
+generalized to the full dataset or to Spotify's catalog. This is also called
+out as a limitation in the root README.
+
+## 16. `popularity_tier` threshold recovery
+
+The raw categorical `popularity` column was cross-tabulated against the
+numeric `popularity_score` column (group-by min/max), which revealed an
+exact, deterministic banding rather than an approximate correlation:
+
+| `popularity` (raw categorical) | `popularity_score` range | n |
+|---|---:|---:|
+| `0low` | 0 – 33 | 161,825 |
+| `1moderate` | 34 – 66 | 108,186 |
+| `2high` | 67 – 100 | 7,927 |
+
+These are the exact thresholds used for the derived `popularity_tier` field
+and the `is_high_popularity` flag (`popularity_score >= 67`) — they were
+**recovered from the data**, not chosen by the analyst, and they are not
+represented anywhere as an official Spotify definition; they reproduce a
+course-provided banding of this specific dataset.
+
+## 17. Primary vs. sensitivity dataset — KPI deltas
+
+The sensitivity dataset keeps one row per `(track, artist_1)` group, selected
+by a documented stable sort on `(track, artist_1, release_date, album_type)`
+that never references `popularity_score` (see
+`src/clean_data.build_sensitivity_dataset`).
+
+| Metric | Primary | Sensitivity | Abs. delta | Rel. delta |
+|---|---:|---:|---:|---:|
+| Track observation count | 277,937 | 277,846 | -91 | -0.03% |
+| Median popularity score | 28.00 | 28.00 | 0.00 | 0.00% |
+| Mean popularity score | 27.7967 | 27.7984 | +0.0016 | +0.01% |
+| High-popularity share | 2.853% | 2.852% | -0.0006pp | -0.02% |
+| Primary genre coverage | 39.716% | 39.716% | -0.0002pp | -0.00% |
+| Median track duration (min) | 3.5518 | 3.5518 | 0.0000 | 0.00% |
+| Median artist popularity | 0.4700 | 0.4700 | 0.0000 | 0.00% |
+| Repeat track/artist share | 0.0655% | 0.0324% | -0.0331pp | -49.98% |
+
+**Interpretation: the differences are trivial for every core KPI except
+`repeat_track_artist_share`, and that one metric's drop is a mechanical
+consequence of the sensitivity dataset's definition (it removes most repeat
+rows by construction), not a substantive finding about the underlying data.**
+No popularity, genre, duration, or artist-popularity conclusion in this
+project would change depending on which of the two datasets was used. This
+result is reported plainly and is not overstated as evidence that
+deduplication "doesn't matter" in general — it means it does not matter *for
+the specific KPIs computed here*, on *this* dataset.
+
+## 18. Malformed rows
+
+None detected. `src.load_data.malformed_row_report()` parses the full raw
+file with a bad-line callback and reports 0 skipped rows.
+
+## 19. Cleaning decisions summary
+
+| Issue | Decision | Rows affected |
+|---|---|---:|
+| Exact full-row duplicates | Removed (keep first) | 1 removed |
+| `(track, artist_1)` repeats | Retained; flagged | 182 rows flagged |
+| `tempo == 0` | Retained; flagged as `zero_tempo`, treated as missing for tempo-dependent analysis | 90 |
+| `release_date == 1899` | Retained; flagged as suspicious, not assumed invalid | 13 |
+| `artist_2` / `artist_3` | Retained as-is; documented as unusable name fields | 100% of rows (columns, not rows, affected) |
+| Missing `artist_1_genre_1` | Preserved as missing; never imputed or treated as a genre category | 167,551 |
+
+## 20. SQL analysis findings (`sql/02_kpi_summary.sql`, `sql/03_segment_analysis.sql`)
+
+All 10 queries (Q1–Q10) execute cleanly against the DuckDB database built
+from the primary dataset; full results and narration are in
+`notebooks/02_sql_business_analysis.ipynb`. New findings beyond the audit
+above:
+
+- **Genre coverage by decade is highly uneven** (22% in the 1940s to 66% in
+  the 1970s), and **2020s coverage is only 29.3%** despite being one of the
+  two largest decade groups in the dataset — reinforcing §15 with a
+  decade-level breakdown.
+- **Genre coverage rises sharply and monotonically with popularity tier:**
+  32.81% (low) → 47.69% (moderate) → 71.75% (high). This is the strongest
+  single confirmation of the genre-availability selection issue in this
+  project. It is **not** evidence that having a genre causes higher
+  popularity — both are plausibly downstream of a common factor (e.g. an
+  artist/track being established enough to have both complete metadata and
+  accumulated plays).
+- **Median rank and high-popularity-share rank diverge by genre.** `reggae`
+  has the highest high-popularity share (13.66%) despite a lower median than
+  `pop` (39 vs. 42) — a heavier upper tail, not a uniformly higher
+  distribution. `classical`, `blues`, and `jazz` have both low medians and
+  very thin high-popularity tails (4, 4, and 11 tracks respectively) despite
+  large group sizes.
+- **Album-type popularity gap only partially explained by release-period
+  age.** Compilations have the lowest popularity of the three album types
+  (§13/Q5) and do skew markedly older (median release year 2010, 48.4%
+  released 2000-or-earlier) than singles (median 2021, 3.5%). But albums
+  also have a large older-release share (40.8%, median 2012) while holding a
+  much higher median popularity than compilations (27 vs. 13) — so release-
+  period age alone does not fully explain the gap. This hypothesis, raised
+  in the Q5 query comment, was checked factually in Q10 rather than left
+  asserted.
+- **Primary-vs-sensitivity KPI comparison, confirmed independently in SQL**
+  (Q9): matches the pandas-computed deltas in §17 to 3+ decimal places.
+  Deltas remain trivial for every KPI checked.
+
+No causal claims are made for any of the above; all are reported as
+descriptive associations in this dataset.
