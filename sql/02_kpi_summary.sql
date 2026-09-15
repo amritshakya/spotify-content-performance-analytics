@@ -57,6 +57,10 @@ ORDER BY release_decade_clean;
 -- Sample size check: smallest genre group is 358 rows (latin), largest is
 -- 28,410 (pop) -- all comfortably large enough for this descriptive
 -- comparison, so no HAVING floor on track_count is needed.
+-- Ordering: a secondary `artist_1_genre_1` key breaks ties on
+-- median_popularity_score (several genres tie, e.g. rap/reggae at 39.0)
+-- deterministically -- without it, tied rows' relative order is not
+-- guaranteed to be stable across query executions.
 -- Interpretation: "among tracks in this dataset with an observed primary
 -- genre," never an unconditional claim about all tracks or about Spotify's
 -- catalog.
@@ -68,7 +72,7 @@ SELECT
 FROM tracks_primary
 WHERE artist_1_genre_1 IS NOT NULL
 GROUP BY artist_1_genre_1
-ORDER BY median_popularity_score DESC;
+ORDER BY median_popularity_score DESC, artist_1_genre_1;
 
 
 -- Q3. High-popularity share by genre

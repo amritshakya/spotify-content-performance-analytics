@@ -93,10 +93,11 @@ analysis right, and both are worth understanding, not just footnoting:
 - The artist field is still not a perfectly clean artist identifier even
   after the correction above — it may contain concatenated collaborator
   names in other, harder-to-detect cases.
-- Roughly 1 in 1,000 to 1 in 700 of the artist-popularity model's
-  predictions fall slightly below the valid 0–100 popularity range across
-  our repeated tests — a small, honestly-reported limitation of a simple
-  linear model, not hidden by post-hoc adjustment.
+- A small fraction of the artist-popularity model's predictions — roughly 1
+  in 2,500 to 1 in 700, depending on the test sample — fall slightly below
+  the valid 0–100 popularity range across our repeated tests — a small,
+  honestly-reported limitation of a simple linear model, not hidden by
+  post-hoc adjustment.
 - Model performance overall is modest, and it specifically struggles to
   identify extreme popularity (see finding 2). This is not a production
   popularity predictor and was not built to be one.

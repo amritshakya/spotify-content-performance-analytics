@@ -17,6 +17,8 @@ primary/sensitivity DataFrames.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
@@ -443,8 +445,22 @@ def run_model(
     # backend on macOS during the X @ coef_ prediction step. Verified this
     # is purely cosmetic: predictions are confirmed 100% finite (no NaN/Inf)
     # with or without it -- it does not mask a real numerical problem.
+    #
+    # The UserWarning filter below is the EXPECTED, intended consequence of
+    # build_pipeline()'s categories="auto" + handle_unknown="ignore" design
+    # (see that function's docstring): a category that exists only in this
+    # particular test split is deliberately encoded as all-zeros rather than
+    # raising. sklearn surfaces that as a UserWarning on every such
+    # occurrence; suppressing it here does not hide an error, only a
+    # confirmation that the intended fallback path ran.
     with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-        y_pred = pipeline.predict(X_test)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Found unknown categories",
+                category=UserWarning,
+            )
+            y_pred = pipeline.predict(X_test)
 
     return {
         "pipeline": pipeline,

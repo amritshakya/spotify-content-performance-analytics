@@ -1,14 +1,26 @@
 # Spotify Content Performance Analytics
 
-A reproducible, professional-tooling analytics project built on a Spotify
-track-catalog extract, focused on data-quality engineering, a documented
-metric layer, and SQL-based descriptive analysis of content, artist, genre,
-and release-period characteristics.
+A reproducible, professional-tooling analytics project on a 278K-row Spotify
+track-catalog extract: data-quality engineering, a documented SQL metric
+layer, and interpretable statistical modeling of content, artist, genre,
+and release-period characteristics against track popularity.
 
 **Status: Phase 2 (data foundation + SQL analytics layer) and Phase 3
 (interpretable popularity modeling) complete.** No clustering, dashboards,
 or deployment have been built — see [Phase 3: Popularity Modeling](#phase-3-popularity-modeling)
 and its Scope Limit note.
+
+## At a Glance
+
+| | |
+|---|---|
+| **Dataset** | 277,938 raw tracks × 34 columns (Spotify catalog extract, coursework-supplied) |
+| **Analytical questions** | *(SQL)* How do content/artist/genre/release characteristics differ across popularity levels? *(modeling)* How much of that variation do observable features explain, and does artist popularity add more? |
+| **Stack** | Python, pandas, DuckDB + SQL, scikit-learn, statsmodels, pytest, Jupyter |
+| **Strongest findings** | Genre coverage rises from 32.8%→71.75% low→high popularity tier (Phase 2); a linear model on content features alone reaches R²≈0.12–0.15 but strongly compresses predictions toward the middle of the range, badly underpredicting genuinely popular tracks (Phase 3); adding artist popularity roughly doubles R² (≈0.27–0.30) but a placeholder artist label ("Various Artists") had to be handled explicitly to get a trustworthy read on that gain |
+| **Where things are** | SQL: [`sql/`](sql/) · Notebooks: [`notebooks/`](notebooks/) · Figures: [`figures/`](figures/) · Full write-ups: [`reports/`](reports/) |
+
+*(Full measurement caveats, no-causal-claims stance, and methodology detail follow below — this table is a map, not a substitute for them.)*
 
 ## Why This Project Exists
 
@@ -387,8 +399,10 @@ predictions fall below 0 for 0.011%–0.061% of test rows; Model B for
   continuous coefficients.
 - A reduced `statsmodels` OLS specification (standardized Model-A
   continuous features + `album_type` only, fit on the grouped training
-  split) confirms these directions with p<0.01 for every coefficient and no
-  multicollinearity concern — associational only, no causal interpretation.
+  split) confirms most of these directions with p<0.001, except `valence`
+  (p=0.76, not statistically significant once genre and decade are omitted
+  from the specification) — no multicollinearity concern (condition
+  number ≈4.7); associational only, no causal interpretation.
 - **Sensitivity dataset:** one corrected grouped evaluation (seed 42) on
   the one-record-per-`(track, artist_1)` dataset shows deltas within the
   same range as ordinary seed-to-seed variability already observed in the
@@ -444,6 +458,13 @@ spotify-content-performance-analytics/
 ```
 
 ## Reproducibility
+
+**Requires access to the original coursework-supplied `spotify.csv`, which
+is not included in or downloadable from this repository** — see
+`data/README.md` "Getting the raw data" for what that file is and how its
+identity is verified. Without it, steps 2–3 and 5 below cannot run; the
+code, SQL, tests against synthetic data, and already-committed notebook
+outputs/figures remain readable regardless.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
