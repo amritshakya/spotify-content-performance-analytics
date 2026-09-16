@@ -76,10 +76,10 @@ writing — always attribute it to the course description.
 - **Unknown, likely non-random sampling frame.** There is no evidence this extract is a random or
   representative sample of Spotify's catalog. Every share/percentage figure in this project is
   therefore scoped explicitly to "tracks in this dataset," never generalized to "Spotify" broadly.
-- **Zero-popularity mass.** ~16.9% of tracks have `popularity_score == 0`, and the bottom of the
+- **Zero-popularity mass.** 16.86% of tracks have `popularity_score == 0`, and the bottom of the
   distribution is comparatively sparse below the median (see `reports/data_quality_report.md`).
-  This pattern is *consistent with* the extract having been pre-filtered or otherwise
-  non-randomly assembled — it is reported as suggestive evidence, not proof.
+  The extract does not document whether this reflects score construction, collection choices,
+  or both.
 - **`artist_2` / `artist_3` are 100% missing** in this extract and are documented as unusable
   collaborator fields (see cleaning policy in the root README / data-quality report).
 - **Genre availability is not random.** Tracks with a populated `artist_1_genre_1` differ

@@ -74,10 +74,13 @@ TARGET_DERIVED_COLUMNS = ["popularity", "popularity_tier", "is_high_popularity"]
 #                                  period (reports/data_quality_report.md
 #                                  sec. 15). Missing genre is therefore kept
 #                                  as its own explicit "Unknown" level rather
-#                                  than imputed or dropped -- if genre
-#                                  availability itself carries information,
-#                                  that should show up as the "Unknown"
-#                                  category's own coefficient, not be
+#                                  than imputed or dropped. "Unknown" is also
+#                                  the dropped reference category (see
+#                                  CATEGORY_REFERENCES below), so every
+#                                  observed genre's coefficient is a contrast
+#                                  against it -- if genre availability itself
+#                                  carries information, that should show up
+#                                  in those contrasts rather than being
 #                                  silently discarded.
 #   release_decade_clean        -- Used as a CATEGORICAL feature (not a
 #                                  continuous year trend), because Phase 2's
@@ -240,14 +243,13 @@ def make_group_ids(artist_1: pd.Series) -> pd.Series:
         one as a single group would force a large set of otherwise-unrelated
         tracks onto one side of the split, and (for "Various Artists" in
         particular, ~5.3% of the primary dataset) can dominate a held-out
-        fold. This is a correction to an earlier version of this function,
-        which grouped all "Various Artists" rows together.
+        fold.
 
-    `artist_1` remains an imperfect canonical artist identifier even after
-    this fix (e.g. it may contain concatenated collaborator names for
-    otherwise-normal-looking entries) -- this function removes the one
-    concrete, identifiable failure mode found in this extract, not every
-    theoretically possible one.
+    `artist_1` remains an imperfect canonical artist identifier (e.g. it may
+    contain concatenated collaborator names for otherwise-normal-looking
+    entries) -- this function addresses the one concrete, identifiable
+    failure mode found in this extract, not every theoretically possible
+    one.
     """
     ids = artist_1.astype("object").copy()
     missing_mask = ids.isna()

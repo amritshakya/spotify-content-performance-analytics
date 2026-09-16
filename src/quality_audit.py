@@ -1,10 +1,11 @@
 """Data-quality audit computations.
 
 Every function here recomputes a finding directly from a DataFrame -- nothing
-in this project hard-codes the audit's numeric results. This module is the
-single source of truth used by both `notebooks/01_data_quality_and_cleaning.ipynb`
-and the report-generation script that produces
-`reports/data_quality_report.md`, so the two can never drift apart.
+in this project hard-codes the audit's numeric results. `notebooks/01_data_quality_and_cleaning.ipynb`
+calls these functions directly. `reports/data_quality_report.md` summarizes
+calculations reproduced by these functions, the SQL layer, and the
+notebooks -- it is a hand-authored write-up, not machine-generated from this
+module.
 
 Functions generally take the RAW-loaded DataFrame (before any cleaning) so
 that the audit describes the data as delivered, not as cleaned.
