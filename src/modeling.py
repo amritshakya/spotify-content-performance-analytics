@@ -326,9 +326,14 @@ def grouped_split(
     random_state: int = RANDOM_SEED,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Primary split design: GroupShuffleSplit grouped on artist_1 (via
-    make_group_ids), so no artist_1 value appears on both sides of the
-    split. Returns (train_idx, test_idx) as positional integer arrays into
-    modeling_df."""
+    make_group_ids), so no single GROUP ID is split across train and test.
+    For a recognized, named artist_1 value this means the artist is cleanly
+    held out on one side. For a missing or placeholder credit (see
+    PLACEHOLDER_ARTIST_LABELS), each row is its own synthetic group, so the
+    group-id guarantee is trivially satisfied but does NOT guarantee the
+    real, unidentified performer behind that credit is absent from the
+    other side -- that overlap cannot be ruled out for those rows. Returns
+    (train_idx, test_idx) as positional integer arrays into modeling_df."""
     groups = make_group_ids(modeling_df["artist_1"])
     splitter = GroupShuffleSplit(
         n_splits=1, test_size=test_size, random_state=random_state

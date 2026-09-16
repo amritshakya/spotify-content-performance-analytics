@@ -17,10 +17,48 @@ and its Scope Limit note.
 | **Dataset** | 277,938 raw tracks × 34 columns (Spotify catalog extract, coursework-supplied) |
 | **Analytical questions** | *(SQL)* How do content/artist/genre/release characteristics differ across popularity levels? *(modeling)* How much of that variation do observable features explain, and does artist popularity add more? |
 | **Stack** | Python, pandas, DuckDB + SQL, scikit-learn, statsmodels, pytest, Jupyter |
-| **Strongest findings** | Genre coverage rises from 32.8%→71.75% low→high popularity tier (Phase 2); a linear model on content features alone reaches R²≈0.12–0.15 but strongly compresses predictions toward the middle of the range, badly underpredicting genuinely popular tracks (Phase 3); adding artist popularity roughly doubles R² (≈0.27–0.30) but a placeholder artist label ("Various Artists") had to be handled explicitly to get a trustworthy read on that gain |
+| **Strongest findings** | Genre coverage rises from 32.8%→71.75% low→high popularity tier (Phase 2); a linear model on content features alone reaches median R²≈0.122 (range 0.106–0.127 across 10 fixed artist-grouped holdouts) but strongly compresses predictions toward the middle of the range, badly underpredicting genuinely popular tracks (Phase 3); adding artist popularity raises median R² to ≈0.290 (range 0.274–0.300), consistently across every holdout |
 | **Where things are** | SQL: [`sql/`](sql/) · Notebooks: [`notebooks/`](notebooks/) · Figures: [`figures/`](figures/) · Full write-ups: [`reports/`](reports/) |
 
 *(Full measurement caveats, no-causal-claims stance, and methodology detail follow below — this table is a map, not a substitute for them.)*
+
+## Headline Results
+
+- Genre metadata coverage rises from 32.81% in the low-popularity tier to
+  71.75% in the high-popularity tier, so genre-based comparisons are subject
+  to strong selection in metadata availability.
+- Across 10 fixed artist-grouped holdouts, the content/context model has
+  median test R² = 0.122, while the specification adding artist popularity
+  has median test R² = 0.290.
+- Both models compress predictions toward the middle of the observed 0–100
+  popularity range; the content/context model especially struggles with the
+  highest-popularity tracks.
+
+<p>
+  <img src="figures/01_model_comparison_grouped_split.png" width="49%" alt="Model A vs. Model B R² across 10 fixed artist-grouped holdouts">
+  <img src="figures/02_actual_vs_predicted.png" width="49%" alt="Actual vs. predicted popularity, Model A and Model B">
+</p>
+
+**Left:** Model A (content/context only) vs. Model B (+ artist popularity)
+test R² across 10 fixed artist-grouped holdouts — Model B's advantage holds
+on every single seed, not just a convenient one. **Right:** actual vs.
+predicted popularity for both models on one fixed representative holdout
+(seed 42) — predictions cluster well below the diagonal at the
+high-popularity end, illustrating the compression described above. Neither
+chart implies a causal relationship between any feature and popularity.
+
+## What This Analysis Supports — and What I Would Test Next
+
+- Genre comparisons should account for substantial and non-random metadata
+  availability.
+- Artist-popularity context materially improves predictive performance, but
+  `artist_1_pop` is conceptually close to the target and is
+  predictive/contextual, not causal.
+- Observable content/context features in this dataset do not identify the
+  extreme upper tail of popularity well under this linear specification.
+- A real content/growth decision would require longitudinal outcome data
+  and exposure/marketing variables to distinguish prediction from
+  incremental effect.
 
 ## Why This Project Exists
 
@@ -181,8 +219,9 @@ Highlights:
 - Genre availability is associated with higher popularity, higher artist
   popularity, and a different release-decade mix (see Measurement Caveats).
 - Primary-vs-sensitivity-dataset KPI deltas are trivial for every metric
-  except `repeat_track_artist_share`, whose drop is a mechanical consequence
-  of the sensitivity dataset's own definition, not a substantive finding.
+  except `repeat_track_artist_share`, which is exactly 0% in the sensitivity
+  dataset by construction (one row per `(track, artist_1)`), not a
+  substantive finding.
 - Genre coverage rises sharply and monotonically with popularity tier
   (32.8% low → 47.7% moderate → 71.75% high) — the strongest single
   confirmation of the genre-availability selection issue (see SQL Analysis).
@@ -210,21 +249,18 @@ below run cleanly against that database.
   inside the window, so it returns each decade's full total rather than a
   running sum); genre availability and top genres ranked by popularity tier;
   a primary-vs-sensitivity KPI comparison computed directly in SQL (matches
-  the pandas figures above to 3+ decimal places); and a factual check of
-  the album-type popularity-gap hypothesis raised in Q5.
+  the pandas figures above to 3+ decimal places); and a descriptive
+  release-period profile by album type, checking (not confirming) the
+  popularity-gap hypothesis raised in Q5.
 
-Q1–Q7 were developed fully interactively: question stated in plain English
-→ grain discussed → query hand-written by the project author → critiqued on
-correctness/grain/null-handling/aggregation/filtering/window semantics/
-partitioning/ordering → confirmed or revised → saved. Each query's file
-comment records that critique, including the reasoning behind specific
-choices such as `RANK()` over `ROW_NUMBER()` for tie handling (Q6) and why
-the window in Q7 deliberately omits `ORDER BY` (it changes the frame from a
-full-partition total to a running sum). Q8–Q10 were authored directly by
-the assistant after the project author explicitly paused the interactive
-process partway through Q7's review to finish the phase; they follow the
-same documented rules (conditioning on observed genre, no causal claims,
-etc.) but were not individually reviewed turn-by-turn the way Q1–Q7 were.
+All 10 queries (Q1–Q10) were reviewed for grain, null handling, aggregation
+semantics, and window-function behavior before being treated as final. Each
+query's file comment documents that review, including the reasoning behind
+specific design choices — for example, why `RANK()` was used over
+`ROW_NUMBER()` for tie handling (Q6), so genres tied on the same count share
+a rank rather than being arbitrarily ordered, and why the window in Q7
+deliberately omits `ORDER BY` (adding one would change the frame from a
+full-partition total to a running sum, breaking the percentage calculation).
 Full results and narration are in `notebooks/02_sql_business_analysis.ipynb`.
 
 ## Phase 3: Popularity Modeling
@@ -253,7 +289,13 @@ gives the headline specification and results.
   never collapsed to top-N/Other or merged into another category), and
   `release_decade_clean` as a **categorical** feature — entangled with
   recency, survivorship, and catalog composition, not a pure content
-  attribute (same caveat as the Phase 2 SQL analysis).
+  attribute (same caveat as the Phase 2 SQL analysis). This `Unknown`
+  recoding is specific to the modeling layer, needed because a one-hot
+  encoder requires an explicit category to represent missingness — it is
+  **not** how the SQL layer treats missing genre. `sql/*.sql` always
+  preserves it as a true SQL `NULL`, filtered explicitly with
+  `IS NOT NULL`/`IS NULL` per query rather than recoded to any label (see
+  SQL Analysis above).
 - **Model B = Model A + `artist_1_pop`.** `artist_1_pop` is conceptually
   very close to the outcome (see Measurement Caveats above) — Model B is a
   contextual/predictive comparison, never evidence of a causal
@@ -276,10 +318,12 @@ gives the headline specification and results.
 **Primary generalization evidence: a repeated artist-grouped split**
 (`GroupShuffleSplit`, 10 fixed, pre-declared seeds —
 `[1, 7, 21, 42, 73, 101, 202, 314, 512, 999]`, chosen before looking at any
-result and never adjusted afterward), so no artist appears on both sides of
-any individual split. **Secondary: a conventional reproducible random row
-split** (seed 42), answering a different practical question, not a "less
-correct" one (see below).
+result and never adjusted afterward). Recognized named-artist groups are
+held out across train/test; unidentified or placeholder credits are
+assigned individual synthetic groups, so underlying performer overlap
+cannot be ruled out for those rows (see "Grouping key" below). **Secondary:
+a conventional reproducible random row split** (seed 42), answering a
+different practical question, not a "less correct" one (see below).
 
 **Grouping key.** `artist_1` is a useful approximate artist identifier, but
 this dataset contains labels that do not name one canonical artist:
@@ -305,14 +349,16 @@ held-out fold the way an unsplit "Various Artists" group once could.
 | Model A | 0.106 – 0.127 | **0.122** | 16.51 | 19.57 |
 | Model B | 0.274 – 0.300 | **0.290** | 14.27 | 17.65 |
 
-Model A is consistently modest and stable across all 10 independently
-chosen seeds. **Model B consistently outperforms Model A on every single
-seed.** Test-set composition is similarly stable across seeds (55,587 ±
-~1,100 rows; 21,031 held-out groups on every seed; test-mean popularity
-27.72–28.23) — the modest seed-to-seed R² spread is attributable to
-ordinary differences in which small artist groups and how much target
-variance land in a given fold, not to instability in the fitted model
-itself (identical specification and preprocessing across all 10 runs).
+Model A is consistently modest and stable across all 10 repeated/fixed
+artist-grouped holdouts. **Model B consistently outperforms Model A on
+every single seed.** Performance varies modestly across the 10 holdouts.
+Test-set size, group count, and mean popularity are relatively stable
+(55,587 ± ~1,100 rows; 21,031 held-out groups on every seed; test-mean
+popularity 27.72–28.23), but this analysis does not isolate the source of
+the remaining score variation — the model specification and preprocessing
+are identical across all 10 runs, but distinguishing test-fold composition
+effects from any other source of run-to-run difference was not attempted
+here.
 
 ### Random split — a different use case, not a different verdict
 
@@ -321,8 +367,13 @@ itself (identical specification and preprocessing across all 10 runs).
   other tracks represented in training?* Relevant to a platform analyzing
   an existing catalog where known artists already have historical data.
 - **Artist-grouped split** approximately asks: *how well can the model
-  predict tracks from artists whose identities were not represented during
-  training?* Closer to generalizing toward unseen artists.
+  predict tracks credited to a different recognized named-artist group than
+  any in training?* This is not a clean test of generalization to
+  brand-new artists with no established popularity history: recognized
+  named-artist groups are held out across train/test, but unidentified or
+  placeholder credits (see "Grouping key" above) are each assigned their
+  own synthetic group, so underlying performer overlap cannot be ruled out
+  for those rows specifically.
 
 Neither is universally superior. In this dataset, with the corrected
 grouping key, the two designs largely **agree**:
@@ -334,7 +385,7 @@ grouping key, the two designs largely **agree**:
 
 The random split does, in principle, allow information associated with the
 same artist identity to appear across train and test, while the grouped
-split evaluates generalization to unseen artists — that structural
+split holds out recognized named-artist groups — that structural
 difference is real. But it does not produce a large gap here: we do not
 have direct evidence in this dataset of information flowing
 inappropriately from training into test under the random design. An
@@ -386,10 +437,12 @@ predictions fall below 0 for 0.011%–0.061% of test rows; Model B for
   under the uncorrected grouping key is gone — most of it traced to the
   `"Various Artists"` artifact above, not a persistent modeling weakness.
 - Performance by artist-frequency group (descriptive only — **not** a test
-  of how Spotify computed `artist_1_pop`): Model B outperforms Model A in
-  every bucket except "100+ tracks per artist," where Model A edges ahead
-  (R² ≈0.20 vs. ≈0.14). Any contamination-style explanation for this
-  remains a hypothesis, not a demonstrated fact.
+  of how Spotify computed `artist_1_pop`; missing/placeholder `artist_1`
+  rows excluded, using the same recognized-artist definition as the split's
+  grouping key — including them made `"Various Artists"` alone dominate the
+  "100+ tracks" bucket): Model B outperforms Model A on both R² and MAE in
+  every bucket, including "100+ tracks per artist" (R² ≈0.18 vs. ≈0.16,
+  MAE ≈15.3 vs. ≈16.4 for Model A).
 - Standardized coefficients (Model B, illustrative split): `artist_1_pop`
   dominates (+9.8/SD — itself a marker of target proximity, not a robust,
   generalizable signal), `loudness` (+0.63/SD) and `valence` (+0.27/SD)
@@ -399,15 +452,30 @@ predictions fall below 0 for 0.011%–0.061% of test rows; Model B for
   continuous coefficients.
 - A reduced `statsmodels` OLS specification (standardized Model-A
   continuous features + `album_type` only, fit on the grouped training
-  split) confirms most of these directions with p<0.001, except `valence`
-  (p=0.76, not statistically significant once genre and decade are omitted
-  from the specification) — no multicollinearity concern (condition
-  number ≈4.7); associational only, no causal interpretation.
-- **Sensitivity dataset:** one corrected grouped evaluation (seed 42) on
-  the one-record-per-`(track, artist_1)` dataset shows deltas within the
-  same range as ordinary seed-to-seed variability already observed in the
-  primary 10-seed sweep — not a distinct, substantive effect of switching
-  datasets. No conclusion changes.
+  split) is reported for descriptive coefficient directions only, not as an
+  inferential confirmation. Its coefficient signs mostly match the Model B
+  coefficients above (`loudness`, `track_duration_minutes`, `tempo`,
+  `album_type` all point the same direction); `valence`'s estimate is
+  near-zero and its sign is not stable once genre and decade are omitted
+  from the specification. This reduced spec's default standard errors
+  assume independent, identically distributed errors under a nonrobust
+  covariance estimate — they do not account for repeated observations
+  sharing the same artist, or for the genre/decade structure this reduced
+  spec drops, so no significance-based claim is made from it. It also
+  changes more than one feature set at once relative to Model B (genre and
+  decade together), so a coefficient difference between the two cannot be
+  attributed to either omitted variable individually. Associational only,
+  no causal interpretation.
+- **Sensitivity dataset:** one grouped evaluation (seed 42) on the
+  one-record-per-`(track, artist_1)` dataset — Model B remains clearly
+  better than Model A in this additional holdout too. Note this comparison
+  does not cleanly isolate the effect of deduplication alone: rebuilding
+  the sensitivity dataset removes rows and shifts every remaining row's
+  position, which changes the synthetic group IDs assigned to
+  missing/placeholder `artist_1` rows (§4) and therefore the exact split
+  composition at "seed 42" — the observed deltas reflect both the dataset
+  change and this split-composition effect together, not deduplication in
+  isolation.
 
 ### Scope limit
 
@@ -476,10 +544,19 @@ cp /path/to/spotify.csv data/raw/spotify.csv
 # 2. Build the processed datasets, Parquet files, and DuckDB database:
 python -m src.build_database
 
-# 3. Run the SQL layer:
-duckdb data/processed/spotify.duckdb < sql/01_data_quality.sql
-duckdb data/processed/spotify.duckdb < sql/02_kpi_summary.sql
-duckdb data/processed/spotify.duckdb < sql/03_segment_analysis.sql
+# 3. Run the SQL layer (uses the `duckdb` Python package already in
+#    requirements.txt -- no separate DuckDB CLI install required; a
+#    standalone `duckdb` executable would also work if you have one, via
+#    `duckdb data/processed/spotify.duckdb < sql/01_data_quality.sql`):
+python3 - <<'PY'
+import duckdb
+for f in ["sql/01_data_quality.sql", "sql/02_kpi_summary.sql", "sql/03_segment_analysis.sql"]:
+    con = duckdb.connect("data/processed/spotify.duckdb")
+    sql = "\n".join(l for l in open(f) if not l.strip().startswith("--"))
+    for stmt in [s.strip() for s in sql.split(";") if s.strip()]:
+        print(con.execute(stmt).fetchdf())
+    con.close()
+PY
 
 # 4. Run the test suite:
 pytest
@@ -503,18 +580,19 @@ jupyter nbconvert --to notebook --execute --inplace \
   findings describe the genre-labeled subset, not the full dataset.
 - No causal claims are made anywhere in this project. Associations between
   content/genre/release characteristics and `popularity_score` are
-  descriptive only. Where a plausible explanation is raised (e.g. release-
-  period age for compilations' lower popularity, `sql/03_segment_analysis.sql`
-  Q10), it is checked factually where possible and reported as partial or
-  untested, never asserted as confirmed.
-- Genre coverage also varies sharply by release decade (22%–66%) and is
-  lowest for 2020s tracks (29.3%) despite that being one of the largest
-  decade groups — genre-by-decade comparisons under-represent recent tracks.
-- SQL queries Q1–Q7 (across `sql/02_kpi_summary.sql` and
-  `sql/03_segment_analysis.sql`) were reviewed interactively per query;
-  Q8–Q10 were authored directly after the project author paused the
-  interactive process to finish the phase (see SQL Analysis) and were not
-  individually critiqued turn-by-turn the same way.
+  descriptive only. Where a plausible explanation is raised (e.g.
+  release-period age for compilations' lower popularity,
+  `sql/03_segment_analysis.sql` Q10), the underlying summary is checked
+  descriptively rather than left as an unexamined guess — but an unadjusted
+  group-level summary does not establish how much (if any) of an outcome
+  gap is associated with the factor being checked, and no such claim is
+  made.
+- Genre coverage also varies sharply by release decade (22% in the 1940s to
+  66% in the 1970s) and is notably low for 2020s tracks (29.3%) despite that
+  being one of the two largest decade groups in the dataset — so while the
+  1940s has the lowest coverage rate overall, the 2020s' comparatively low
+  coverage affects far more tracks in absolute terms, and genre-by-decade
+  comparisons under-represent recent tracks disproportionately as a result.
 - This project was not used to drive any real Spotify business decision —
   it is a portfolio analytics project built on a coursework-supplied data
   extract.

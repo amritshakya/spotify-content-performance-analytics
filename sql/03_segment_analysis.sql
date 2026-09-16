@@ -3,18 +3,20 @@
 --
 -- Segment-analysis queries against the PRIMARY analytical dataset
 -- (tracks_primary), plus a comparison against the SENSITIVITY dataset
--- (tracks_sensitivity). Developed interactively, same process as
--- 02_kpi_summary.sql: each query below was written by the project author,
--- reviewed for correctness/grain/null-handling/window-function-semantics/
--- partitioning/ordering, then saved -- for interview defensibility, not
--- authored directly by an LLM.
+-- (tracks_sensitivity). Each query was reviewed for grain, null handling,
+-- aggregation semantics, and window-function behavior before being treated
+-- as final -- see the comment above each query for that review, and
+-- README.md "SQL Analysis" for the finished layer's scope.
 --
 -- Every popularity/share figure below describes "tracks in this dataset" at
 -- an unknown collection time -- see README.md "Measurement Caveats" and
 -- reports/data_quality_report.md for the full limitations this SQL layer
 -- inherits.
 --
--- Run with:  duckdb data/processed/spotify.duckdb < sql/03_segment_analysis.sql
+-- Run with the DuckDB CLI if installed:
+--   duckdb data/processed/spotify.duckdb < sql/03_segment_analysis.sql
+-- or via the Python duckdb package already in requirements.txt -- see
+-- README.md "Reproducibility" for a short runnable snippet.
 -- ============================================================================
 
 
@@ -134,14 +136,16 @@ ORDER BY
 -- an observed primary genre? Question (8b): among genre-labeled tracks,
 -- which genres are most common within each tier?
 -- Grain (8a): one row per popularity_tier. Grain (8b): one row per
--- (tier, genre), limited to each tier's top 5 by track count.
+-- (tier, genre), limited to ranks 1-5 per tier, INCLUDING TIES -- RANK()
+-- means a tier with several genres tied for rank 5 keeps all of them, so a
+-- tier's row count here can exceed 5.
 -- Null handling: popularity_tier IS NOT NULL and (for 8b)
 -- artist_1_genre_1 IS NOT NULL are both filtered before aggregation.
 -- Technique (8a): conditional aggregation, same pattern as Q3/Q4/Q5.
 -- Technique (8b): RANK() OVER (PARTITION BY popularity_tier ORDER BY
 -- track_count DESC), same justification as Q6 (ties should share a rank),
--- combined with QUALIFY to keep only the top 5 per tier without a wrapping
--- subquery.
+-- combined with QUALIFY to keep only ranks 1-5 (including ties) per tier
+-- without a wrapping subquery.
 -- Finding (8a) is one of the strongest in this project: genre coverage
 -- rises monotonically and sharply with popularity tier -- 32.81% (low) ->
 -- 47.69% (moderate) -> 71.75% (high). This is additional, tier-level
@@ -229,25 +233,32 @@ SELECT * FROM sensitivity_kpis;
 -- Q10. Release-period profile by album type (factual check on a Q5 hypothesis)
 -- ----------------------------------------------------------------------------
 -- Question: Q5 (sql/02_kpi_summary.sql) flagged "compilations skew toward
--- older/reissued content" as an untested explanation for their lower
--- popularity. This checks it directly: what is each album_type's release-
--- year profile in this dataset?
+-- older/reissued content" as an untested, plausible explanation for their
+-- lower popularity. This checks release period directly: what is each
+-- album_type's release-year profile in this dataset?
 -- Grain: one row per album_type.
 -- Null handling: WHERE release_year IS NOT NULL excludes the 4 rows with
 -- unknown release date, before aggregation.
--- Finding (factual, not causal): compilations do skew markedly older --
--- median release year 2010, with 48.4% released in 2000 or earlier, versus
--- singles at median 2021 and only 3.5% that old. But albums also have a
--- large older-release share (40.8%, median 2012) while still having a much
--- higher median popularity_score than compilations (27 vs. 13, from Q5) --
--- so release-period age alone does not fully explain the compilation
--- popularity gap. The hypothesis is PARTIALLY supported, not confirmed as a
--- complete explanation, and no causal claim is made either way.
+-- pct_released_2000_or_earlier uses release_year (the raw release year),
+-- NOT release_decade_clean -- release_decade_clean == 2000 represents the
+-- entire 2000-2009 decade, so a decade-bucket comparison here would
+-- silently fold nine extra years of 2000s-era tracks into a bucket the
+-- metric's own name promises is capped at the literal year 2000.
+-- Finding (descriptive only): compilations have the lowest median release
+-- year (2010) of the three album types, and singles are by far the most
+-- recent (median 2021). But on the literal "released 2000 or earlier"
+-- measure, albums (23.0%) are the OLDEST-skewing group, not compilations
+-- (18.3%) -- singles remain a clear low outlier (1.3%). Album types have
+-- meaningfully different release-period profiles, but these unadjusted
+-- summaries do not establish how much of the popularity gap between album
+-- types (Q5) is associated with release period -- no causal or
+-- explanatory claim is made, and no adjustment for other differences
+-- between the groups (e.g. genre mix) has been attempted here.
 SELECT
     album_type,
     COUNT(*) AS track_count,
     MEDIAN(release_year) AS median_release_year,
-    ROUND(100.0 * AVG(CASE WHEN release_decade_clean <= 2000 THEN 1 ELSE 0 END), 2) AS pct_released_2000_or_earlier
+    ROUND(100.0 * AVG(CASE WHEN release_year <= 2000 THEN 1 ELSE 0 END), 2) AS pct_released_2000_or_earlier
 FROM tracks_primary
 WHERE release_year IS NOT NULL
 GROUP BY album_type

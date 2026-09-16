@@ -1,4 +1,8 @@
-"""Tests for src/build_database.py."""
+"""Tests for src/build_database.py, plus a small number of targeted
+DuckDB-query tests for sql/*.sql files that don't warrant their own test
+module."""
+
+from pathlib import Path
 
 import duckdb
 import pandas as pd
@@ -97,3 +101,45 @@ def test_full_database_row_counts_match_processed_datasets(
     con.close()
     assert n_primary == len(primary_df)
     assert n_sensitivity == len(sensitivity_df)
+
+
+def _extract_q10_statement() -> str:
+    """Pull Q10's exact SELECT statement text out of
+    sql/03_segment_analysis.sql (the last statement in the file), so this
+    test protects the actual file content rather than a reimplementation
+    of its logic."""
+    sql_path = (
+        Path(__file__).resolve().parent.parent / "sql" / "03_segment_analysis.sql"
+    )
+    sql_text = sql_path.read_text()
+    lines = [l for l in sql_text.splitlines() if not l.strip().startswith("--")]
+    statements = [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
+    return statements[-1] + ";"
+
+
+def test_q10_release_year_boundary_behavior():
+    """Regression guard for the release_decade_clean -> release_year fix:
+    the literal cutoff must include exactly 2000 and earlier, exclude 2001
+    and later, and exclude rows with an unknown release_year from both the
+    numerator and the denominator."""
+    con = duckdb.connect(":memory:")
+    con.register(
+        "tracks_primary",
+        pd.DataFrame(
+            {
+                "album_type": ["album", "album", "album"],
+                "release_year": [2000.0, 2001.0, None],
+            }
+        ),
+    )
+    result = con.execute(_extract_q10_statement()).fetchdf()
+    con.close()
+
+    assert len(result) == 1  # one row (album_type = 'album')
+    row = result.iloc[0]
+    # year 2000 and year 2001 rows both counted in the denominator; the
+    # null-year row is excluded entirely (track_count == 2, not 3).
+    assert row["track_count"] == 2
+    # exactly the year-2000 row (1 of 2) counts as "released 2000 or
+    # earlier" -- year 2001 must NOT be included.
+    assert row["pct_released_2000_or_earlier"] == pytest.approx(50.0)

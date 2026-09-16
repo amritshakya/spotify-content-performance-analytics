@@ -258,12 +258,17 @@ that never references `popularity_score` (see
 | Primary genre coverage | 39.716% | 39.716% | -0.0002pp | -0.00% |
 | Median track duration (min) | 3.5518 | 3.5518 | 0.0000 | 0.00% |
 | Median artist popularity | 0.4700 | 0.4700 | 0.0000 | 0.00% |
-| Repeat track/artist share | 0.0655% | 0.0324% | -0.0331pp | -49.98% |
+| Repeat track/artist share | 0.0655% | 0.0000% | -0.0655pp | -100.00% |
 
 **Interpretation: the differences are trivial for every core KPI except
-`repeat_track_artist_share`, and that one metric's drop is a mechanical
-consequence of the sensitivity dataset's definition (it removes most repeat
-rows by construction), not a substantive finding about the underlying data.**
+`repeat_track_artist_share`, which is exactly 0% in the sensitivity dataset
+by construction** (the sensitivity dataset is defined as one row per
+`(track, artist_1)`, so no repeated combination can remain in it — this is
+not a substantive finding about the underlying data, just confirmation that
+the sensitivity dataset was built as documented). `track_artist_duplicate_flag`
+is recomputed fresh on the sensitivity dataset (`src/clean_data.build_sensitivity_dataset`)
+rather than inherited from the primary dataset, specifically so this metric
+reflects the dataset actually being measured.
 No popularity, genre, duration, or artist-popularity conclusion in this
 project would change depending on which of the two datasets was used. This
 result is reported plainly and is not overstated as evidence that
@@ -310,15 +315,17 @@ above:
   distribution. `classical`, `blues`, and `jazz` have both low medians and
   very thin high-popularity tails (4, 4, and 11 tracks respectively) despite
   large group sizes.
-- **Album-type popularity gap only partially explained by release-period
-  age.** Compilations have the lowest popularity of the three album types
-  (§13/Q5) and do skew markedly older (median release year 2010, 48.4%
-  released 2000-or-earlier) than singles (median 2021, 3.5%). But albums
-  also have a large older-release share (40.8%, median 2012) while holding a
-  much higher median popularity than compilations (27 vs. 13) — so release-
-  period age alone does not fully explain the gap. This hypothesis, raised
-  in the Q5 query comment, was checked factually in Q10 rather than left
-  asserted.
+- **Album types have different release-period profiles, but this does not
+  establish why compilations are least popular.** Compilations have the
+  lowest popularity of the three album types (§13/Q5) and the lowest median
+  release year (2010) of the three, versus singles at median 2021. But on a
+  literal "released 2000 or earlier" measure, albums (23.0%) are the
+  OLDEST-skewing group, not compilations (18.3%) — while albums still hold
+  a much higher median popularity than compilations (27 vs. 13). Album
+  types have meaningfully different release-period profiles, but these
+  unadjusted summaries do not establish how much of the popularity gap is
+  associated with release period. This question, raised in the Q5 query
+  comment, was checked descriptively in Q10 rather than left asserted.
 - **Primary-vs-sensitivity KPI comparison, confirmed independently in SQL**
   (Q9): matches the pandas-computed deltas in §17 to 3+ decimal places.
   Deltas remain trivial for every KPI checked.

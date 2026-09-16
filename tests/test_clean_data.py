@@ -65,6 +65,27 @@ def test_sensitivity_dataset_is_strict_subset_of_primary_by_row_count(
     assert len(sensitivity_df) > 0
 
 
+def test_sensitivity_track_artist_duplicate_flag_is_recomputed_not_inherited(
+    sensitivity_df,
+):
+    """Regression guard: track_artist_duplicate_flag must be recomputed
+    fresh on the sensitivity dataset, not carried over stale from the
+    primary dataset. By construction (one row per (track, artist_1)), it
+    must be all-False here -- a nonzero sum would mean the flag is still
+    describing each row's duplicate status in the primary dataset instead
+    of the sensitivity dataset it's attached to."""
+    assert sensitivity_df["track_artist_duplicate_flag"].sum() == 0
+
+
+def test_sensitivity_repeat_track_artist_share_is_zero(sensitivity_df):
+    """End-to-end guard for the same invariant via the public metric
+    function, since this is the number actually reported in
+    reports/data_quality_report.md and the notebooks."""
+    from src.metrics import repeat_track_artist_share
+
+    assert repeat_track_artist_share(sensitivity_df) == 0.0
+
+
 def test_sensitivity_selection_does_not_use_popularity():
     """Construct a synthetic (track, artist_1) group where the highest
     popularity row is NOT the one that would win a stable sort on

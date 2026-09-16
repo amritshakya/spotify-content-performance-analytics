@@ -2,17 +2,20 @@
 -- 02_kpi_summary.sql
 --
 -- Descriptive KPI queries against the PRIMARY analytical dataset
--- (tracks_primary), developed interactively: each query below was written
--- by the project author, then reviewed for correctness/grain/null-handling/
--- aggregation logic/filtering before being saved here -- for interview
--- defensibility, not authored directly by an LLM.
+-- (tracks_primary). Each query was reviewed for grain, null handling,
+-- aggregation semantics, and window-function behavior before being treated
+-- as final -- see the comment above each query for that review, and
+-- README.md "SQL Analysis" for the finished layer's scope.
 --
 -- Every popularity/share figure below describes "tracks in this dataset" at
 -- an unknown collection time -- see README.md "Measurement Caveats" and
 -- reports/data_quality_report.md for the full limitations this SQL layer
 -- inherits.
 --
--- Run with:  duckdb data/processed/spotify.duckdb < sql/02_kpi_summary.sql
+-- Run with the DuckDB CLI if installed:
+--   duckdb data/processed/spotify.duckdb < sql/02_kpi_summary.sql
+-- or via the Python duckdb package already in requirements.txt -- see
+-- README.md "Reproducibility" for a short runnable snippet.
 -- ============================================================================
 
 

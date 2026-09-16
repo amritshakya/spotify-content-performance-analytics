@@ -39,29 +39,40 @@ popular one, but they cannot pick out a smash hit.** That's specific to this
 dataset, this feature set, and this style of model — it is not a claim
 that a song's content never matters for how popular it becomes.
 
-## 3. Adding artist popularity materially changes prediction — with a caveat about what "unseen artist" means
+## 3. Adding artist popularity materially changes prediction — but "unseen artist" comes with a caveat
 
 Adding the artist's own popularity score roughly doubles the explained
 variation (to about 27–30%), and — after correcting how we grouped artists
-for testing (see below) — this improvement holds up consistently whether
-we test on brand-new artists or on a random sample. That is a real,
-repeatable improvement in this dataset, not a one-off. At the same time, an
-artist's own popularity score is so conceptually close to a track's
-popularity that this should be read as "artists who are already popular
-tend to have popular tracks" rather than as a discovery about what makes a
-track popular — it is not treated as a causal effect, and its practical
-value depends on whether a real use case involves already-known artists or
-genuinely new ones.
+for testing (see below) — this improvement holds up consistently whether we
+test on a held-out group of artists or on a random sample. That is a real,
+repeatable improvement in this dataset, not a one-off. One caveat on what
+"held-out" means here: recognized, named artists are cleanly separated
+between training and testing, but a meaningful slice of tracks carry
+placeholder or unidentified artist credits (not a real performer's name —
+see below); those are each treated as their own isolated case rather than
+grouped together, but we cannot rule out that the actual, unnamed performer
+behind one of those credits also appears elsewhere in the training data. So
+this is a good test of generalizing to a *different named-artist grouping*,
+not a guaranteed test of generalizing to a *brand-new performer with no
+popularity history at all*. Separately, an artist's own popularity score is
+so conceptually close to a track's popularity that this should be read as
+"artists who are already popular tend to have popular tracks" rather than
+as a discovery about what makes a track popular — it is not treated as a
+causal effect.
 
 ## 4. Random and artist-grouped evaluation answer different practical questions
 
-We tested the model two ways: once holding out entire artists the model
-never saw during training (closer to predicting for brand-new catalog
-entrants), and once with a conventional random sample (closer to a
-platform working with artists it already has some history on). These
-answer different real-world questions, and neither is "more correct" in
-general. In this dataset, once the artist-grouping was corrected (see
-below), both approaches told a consistent story.
+We tested the model two ways: once holding out entire recognized,
+named-artist groups the model never saw during training, and once with a
+conventional random sample (closer to a platform working with artists it
+already has some history on). The held-out-artist test is not a clean
+guarantee of predicting for genuinely brand-new catalog entrants, since a
+meaningful slice of tracks carry placeholder or unidentified artist credits
+whose real, unnamed performer could still overlap with training (see
+above). These two approaches still answer different real-world questions,
+and neither is "more correct" in general. In this dataset, once the
+artist-grouping was corrected (see below), both approaches told a
+consistent story.
 
 ## 5. Metadata limitations materially affect interpretation
 

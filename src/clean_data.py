@@ -189,6 +189,14 @@ def build_sensitivity_dataset(primary_df: pd.DataFrame) -> pd.DataFrame:
     This dataset is a SENSITIVITY CHECK, not a canonical or "clean truth"
     dataset -- see reports/data_quality_report.md for how its KPIs compare
     to the primary dataset.
+
+    `track_artist_duplicate_flag` is recomputed fresh on the resulting
+    dataset (not carried over from `primary_df`) -- by construction, one
+    record per (track, artist_1) means this flag must be all-False here.
+    The value inherited from `primary_df` would otherwise describe each
+    row's duplicate status in the PRIMARY dataset, which is stale and
+    incorrect once read as a statement about the sensitivity dataset (the
+    row survived precisely because its group was deduplicated).
     """
     sort_keys = ["track", "artist_1", "release_date", "album_type"]
     stable_sorted = primary_df.sort_values(
@@ -196,5 +204,8 @@ def build_sensitivity_dataset(primary_df: pd.DataFrame) -> pd.DataFrame:
     )
     sensitivity = stable_sorted.drop_duplicates(
         subset=["track", "artist_1"], keep="first"
+    ).reset_index(drop=True)
+    sensitivity["track_artist_duplicate_flag"] = sensitivity.duplicated(
+        subset=["track", "artist_1"], keep=False
     )
-    return sensitivity.reset_index(drop=True)
+    return sensitivity

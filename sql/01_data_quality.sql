@@ -11,7 +11,10 @@
 -- reports/data_quality_report.md. Every share/percentage below describes
 -- "tracks in this dataset," not Spotify's catalog generally.
 --
--- Run with:  duckdb data/processed/spotify.duckdb < sql/01_data_quality.sql
+-- Run with the DuckDB CLI if installed:
+--   duckdb data/processed/spotify.duckdb < sql/01_data_quality.sql
+-- or via the Python duckdb package already in requirements.txt -- see
+-- README.md "Reproducibility" for a short runnable snippet.
 -- ============================================================================
 
 
